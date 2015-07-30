@@ -59,6 +59,14 @@ options:
     choices: [ "yes", "no" ]
     default: "no"
     version_added: "2.0"
+  sha256sum:
+    description:
+      - If a SHA-256 checksum is passed to this parameter and src contains ://, the digest of the
+        destination file will be calculated after it is downloaded to ensure
+        its integrity and verify that the transfer completed successfully.
+    version_added: "2.0"
+    required: false
+    default: null
 author: "Dylan Martin (@pileofrogs)"
 todo:
     - detect changed/unchanged for .zip files
@@ -84,7 +92,7 @@ EXAMPLES = '''
 - unarchive: src=/tmp/foo.zip dest=/usr/local/bin copy=no
 
 # Unarchive a file that needs to be downloaded (added in 2.0)
-- unarchive: src=https://example.com/example.zip dest=/usr/local/bin copy=no
+- unarchive: src=https://example.com/example.zip dest=/usr/local/bin copy=no sha256sum=b5bb9d8014a0f9b1d61e21e796d78dccdf1352f23cd32812f4850b878ae4944c
 '''
 
 import re
@@ -262,7 +270,8 @@ def main():
             dest              = dict(required=True),
             copy              = dict(default=True, type='bool'),
             creates           = dict(required=False),
-            list_files          = dict(required=False, default=False, type='bool'),
+            list_files        = dict(required=False, default=False, type='bool'),
+            sha256sum         = dict(default=''),
         ),
         add_file_common_args=True,
     )
@@ -271,6 +280,7 @@ def main():
     dest   = os.path.expanduser(module.params['dest'])
     copy   = module.params['copy']
     file_args = module.load_file_common_arguments(module.params)
+    sha256sum = module.params['sha256sum']
 
     # did tar file arrive?
     if not os.path.exists(src):
@@ -295,6 +305,17 @@ def main():
                 src = package
             except Exception, e:
                 module.fail_json(msg="Failure downloading %s, %s" % (src, e))
+
+            # Check the digest of the source file and ensure that it matches the
+            # sha256sum parameter if it is present
+            if sha256sum != '':
+                # Remove any non-alphanumeric characters, including the infamous
+                # Unicode zero-width space
+                stripped_sha256sum = re.sub(r'\W+', '', sha256sum)
+                src_checksum = module.sha256(src)
+
+                if stripped_sha256sum.lower() != src_checksum:
+                    module.fail_json(msg="The SHA-256 checksum for %s did not match %s; it was %s." % (src, sha256sum, src_checksum))
         else:
             module.fail_json(msg="Source '%s' does not exist" % src)
     if not os.access(src, os.R_OK):
